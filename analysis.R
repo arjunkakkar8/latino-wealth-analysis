@@ -31,23 +31,21 @@ summary(raw$REALPROP) # real estate property
 # Define Latino population based on HISPAN and HISPRULE variables
 data <- raw %>%
   mutate(
-    # Create Latino identifier
+    # Create Latino identifier based on codebook: HISPAN codes 1-4 are Hispanic, 0=Not Hispanic
     latino = case_when(
-      HISPAN > 0 & HISPAN < 900 ~ TRUE,
+      HISPAN >= 1 & HISPAN <= 4 ~ TRUE,
       .default = FALSE
     ),
     # Clean up year variable
     census_year = YEAR,
-    # Weight variable for population estimates
-    weight = if ("PERWT" %in% names(.)) PERWT else if ("HHWT" %in% names(.)) HHWT else 1
   )
 
-# 1. Total Latino Population by Year
+# 1. Total Latino Population by Year (Person-level analysis)
 latino_pop_by_year <- data %>%
   group_by(census_year) %>%
   summarise(
-    total_population = sum(weight),
-    latino_population = sum(weight[latino == TRUE]),
+    total_population = sum(PERWT),
+    latino_population = sum(PERWT[latino == TRUE]),
     .groups = "drop"
   ) %>%
   mutate(
@@ -57,13 +55,14 @@ latino_pop_by_year <- data %>%
 print("Latino Population by Year:")
 print(latino_pop_by_year)
 
-# 2. Share Foreign Born among Latinos
+# 2. Share Foreign Born among Latinos (Person-level analysis)
 if ("BPL" %in% names(data)) {
   foreign_born_latinos <- data %>%
     filter(latino == TRUE) %>%
     mutate(
+      # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
       foreign_born = case_when(
-        BPL >= 100 & BPL <= 120 ~ FALSE, # US states
+        BPL >= 1 & BPL <= 120 ~ FALSE, # US states and territories
         BPL > 120 ~ TRUE, # Foreign countries
         TRUE ~ NA
       )
@@ -71,8 +70,8 @@ if ("BPL" %in% names(data)) {
     filter(!is.na(foreign_born)) %>%
     group_by(census_year) %>%
     summarise(
-      total_latinos = sum(weight),
-      foreign_born_latinos = sum(weight[foreign_born == TRUE]),
+      total_latinos = sum(PERWT),
+      foreign_born_latinos = sum(PERWT[foreign_born == TRUE]),
       .groups = "drop"
     ) %>%
     mutate(
@@ -83,14 +82,15 @@ if ("BPL" %in% names(data)) {
   print(foreign_born_latinos)
 }
 
-# 3. Citizenship Status among Latinos
+# 3. Citizenship Status among Latinos (Person-level analysis)
 if ("CITIZEN" %in% names(data)) {
   citizenship_latinos <- data %>%
     filter(latino == TRUE) %>%
     filter(!is.na(CITIZEN) & CITIZEN != 0) %>%
     mutate(
+      # Based on codebook: 1=Born abroad of American parents, 2=Naturalized, 3=Not citizen, 4=First papers
       not_citizen = case_when(
-        CITIZEN == 1 ~ FALSE, # Born in US
+        CITIZEN == 1 ~ FALSE, # Born abroad of American parents (citizen)
         CITIZEN == 2 ~ FALSE, # Naturalized citizen
         CITIZEN == 3 ~ TRUE, # Not a citizen
         CITIZEN == 4 ~ TRUE, # Not a citizen, but has received first papers
@@ -104,9 +104,9 @@ if ("CITIZEN" %in% names(data)) {
     filter(!is.na(not_citizen)) %>%
     group_by(census_year) %>%
     summarise(
-      total_latinos = sum(weight),
-      not_citizens = sum(weight[not_citizen == TRUE]),
-      first_papers_only = sum(weight[first_papers == TRUE]),
+      total_latinos = sum(PERWT),
+      not_citizens = sum(PERWT[not_citizen == TRUE]),
+      first_papers_only = sum(PERWT[first_papers == TRUE]),
       .groups = "drop"
     ) %>%
     mutate(
@@ -118,25 +118,27 @@ if ("CITIZEN" %in% names(data)) {
   print(citizenship_latinos)
 }
 
-# 4. Latino Subgroup Analysis (by birthplace and HISPAN codes)
+# 4. Latino Subgroup Analysis (Person-level analysis)
 latino_subgroups <- data %>%
   filter(latino == TRUE) %>%
   mutate(
+    # Based on codebook: HISPAN codes 1=Mexican, 2=Puerto Rican, 3=Cuban, 4=Other
     latino_origin = case_when(
-      HISPAN == 100 ~ "Mexican",
-      HISPAN == 200 ~ "Puerto Rican",
-      HISPAN == 300 ~ "Cuban",
-      HISPAN == 401 ~ "Dominican",
-      HISPAN == 410 ~ "Central American",
-      HISPAN == 420 ~ "South American",
-      HISPAN >= 400 & HISPAN < 500 ~ "Other Central/South American",
-      HISPAN >= 500 ~ "Other Hispanic",
+      HISPAN == 1 ~ "Mexican",
+      HISPAN == 2 ~ "Puerto Rican",
+      HISPAN == 3 ~ "Cuban",
+      HISPAN == 4 ~ "Other Hispanic",
+      HISPRULE == 1 ~ "Hispanic by birthplace",
+      HISPRULE == 2 ~ "Hispanic by parent birthplace",
+      HISPRULE == 3 ~ "Hispanic by grandparent birthplace",
+      HISPRULE %in% 4:5 ~ "Hispanic by family relationship",
+      HISPRULE %in% 6:8 ~ "Hispanic by surname",
       TRUE ~ "Hispanic/Latino (unspecified)"
     )
   ) %>%
   group_by(census_year, latino_origin) %>%
   summarise(
-    count = sum(weight),
+    count = sum(PERWT),
     .groups = "drop"
   ) %>%
   group_by(census_year) %>%
@@ -148,7 +150,7 @@ latino_subgroups <- data %>%
 print("Latino Subgroups by Year:")
 print(latino_subgroups)
 
-# 5. Latino Population by Region
+# 5. Latino Population by Region (Person-level analysis)
 if ("REGION" %in% names(data)) {
   latino_by_region <- data %>%
     filter(latino == TRUE) %>%
@@ -168,7 +170,7 @@ if ("REGION" %in% names(data)) {
     ) %>%
     group_by(census_year, region_name) %>%
     summarise(
-      latino_count = sum(weight),
+      latino_count = sum(PERWT),
       .groups = "drop"
     ) %>%
     group_by(census_year) %>%
@@ -181,13 +183,13 @@ if ("REGION" %in% names(data)) {
   print(latino_by_region)
 }
 
-# 6. Top 3 Occupations among Latinos
+# 6. Top 3 Occupations among Latinos (Person-level analysis)
 if ("OCC" %in% names(data)) {
   top_occupations <- data %>%
     filter(latino == TRUE & !is.na(OCC) & OCC != 0) %>%
     group_by(census_year, OCC) %>%
     summarise(
-      count = sum(weight),
+      count = sum(PERWT),
       .groups = "drop"
     ) %>%
     group_by(census_year) %>%
@@ -199,11 +201,12 @@ if ("OCC" %in% names(data)) {
   print(top_occupations)
 }
 
-# 7. Business Ownership among Latinos (Self-employed)
+# 7. Business Ownership among Latinos (Person-level analysis)
 if ("CLASSWKR" %in% names(data)) {
   business_ownership <- data %>%
     filter(latino == TRUE & !is.na(CLASSWKR) & CLASSWKR != 0) %>%
     mutate(
+      # Based on codebook: 1=Self-employed, 2=Works for wages
       self_employed = case_when(
         CLASSWKR == 1 ~ TRUE, # Self-employed
         CLASSWKR == 2 ~ FALSE, # Works for wages
@@ -213,8 +216,8 @@ if ("CLASSWKR" %in% names(data)) {
     filter(!is.na(self_employed)) %>%
     group_by(census_year) %>%
     summarise(
-      total_latinos = sum(weight),
-      self_employed_latinos = sum(weight[self_employed == TRUE]),
+      total_latinos = sum(PERWT),
+      self_employed_latinos = sum(PERWT[self_employed == TRUE]),
       .groups = "drop"
     ) %>%
     mutate(
@@ -225,13 +228,14 @@ if ("CLASSWKR" %in% names(data)) {
   print(business_ownership)
 }
 
-# 8. Farm Status among Latino Households
+# 8. Farm Status among Latino Households (Household-level analysis)
 if ("FARM" %in% names(data)) {
   farm_status <- data %>%
-    filter(latino == TRUE & !is.na(FARM)) %>%
+    filter(latino == TRUE & !is.na(FARM) & PERNUM == 1) %>% # Use only householder records
     mutate(
+      # Based on codebook: 1=Non-Farm, 2=Farm
       has_farm = case_when(
-        FARM == 1 ~ FALSE, # No farm
+        FARM == 1 ~ FALSE, # Non-farm
         FARM == 2 ~ TRUE, # Farm
         TRUE ~ NA
       )
@@ -239,8 +243,8 @@ if ("FARM" %in% names(data)) {
     filter(!is.na(has_farm)) %>%
     group_by(census_year) %>%
     summarise(
-      total_latino_households = sum(weight),
-      latino_farm_households = sum(weight[has_farm == TRUE]),
+      total_latino_households = sum(HHWT),
+      latino_farm_households = sum(HHWT[has_farm == TRUE]),
       .groups = "drop"
     ) %>%
     mutate(
@@ -251,22 +255,23 @@ if ("FARM" %in% names(data)) {
   print(farm_status)
 }
 
-# 9. Homeownership among Latinos
+# 9. Homeownership among Latino Households (Household-level analysis)
 if ("OWNERSHP" %in% names(data)) {
   homeownership <- data %>%
-    filter(latino == TRUE & !is.na(OWNERSHP) & OWNERSHP != 0) %>%
+    filter(latino == TRUE & !is.na(OWNERSHP) & OWNERSHP != 0 & PERNUM == 1) %>% # Use only householder records
     mutate(
+      # Based on codebook: 1=Owned or being bought (loan), 2=Rented
       owns_home = case_when(
         OWNERSHP == 1 ~ TRUE, # Owned or being bought (loan)
-        OWNERSHP == 2 ~ FALSE, # Rents
+        OWNERSHP == 2 ~ FALSE, # Rented
         TRUE ~ NA
       )
     ) %>%
     filter(!is.na(owns_home)) %>%
     group_by(census_year) %>%
     summarise(
-      total_latino_households = sum(weight),
-      latino_homeowners = sum(weight[owns_home == TRUE]),
+      total_latino_households = sum(HHWT),
+      latino_homeowners = sum(HHWT[owns_home == TRUE]),
       .groups = "drop"
     ) %>%
     mutate(
@@ -277,13 +282,13 @@ if ("OWNERSHP" %in% names(data)) {
   print(homeownership)
 }
 
-# 10. Median Home Value among Latino Homeowners
+# 10. Median Home Value among Latino Homeowners (Household-level analysis)
 if ("VALUEH" %in% names(data)) {
   home_values <- data %>%
-    filter(latino == TRUE & !is.na(VALUEH) & VALUEH > 0 & VALUEH < 9999999) %>%
+    filter(latino == TRUE & !is.na(VALUEH) & VALUEH > 0 & VALUEH < 9999999 & PERNUM == 1) %>% # Use only householder records
     group_by(census_year) %>%
     summarise(
-      median_home_value = median(rep(VALUEH, weight)),
+      median_home_value = median(rep(VALUEH, HHWT)),
       .groups = "drop"
     )
 
@@ -291,26 +296,26 @@ if ("VALUEH" %in% names(data)) {
   print(home_values)
 }
 
-# 11. Median Household Income among Latinos
+# 11. Median Household Income among Latino Households (Household-level analysis)
 if ("HHINCOME" %in% names(data)) {
   household_income <- data %>%
-    filter(latino == TRUE & !is.na(HHINCOME) & HHINCOME > 0 & HHINCOME < 9999999) %>%
+    filter(latino == TRUE & !is.na(HHINCOME) & HHINCOME > 0 & HHINCOME < 9999999 & PERNUM == 1) %>% # Use only householder records
     group_by(census_year) %>%
     summarise(
-      median_hh_income = median(rep(HHINCOME, weight)),
+      median_hh_income = median(rep(HHINCOME, HHWT)),
       .groups = "drop"
     )
 
-  print("Median Household Income among Latinos:")
+  print("Median Household Income among Latino Households:")
   print(household_income)
 }
 
-# 12. Real Estate Value (1850 only)
+# 12. Real Estate Value (1850 only) (Person-level analysis)
 if ("REALPROP" %in% names(data)) {
   real_estate_1850 <- data %>%
     filter(latino == TRUE & census_year == 1850 & !is.na(REALPROP) & REALPROP > 0) %>%
     summarise(
-      median_real_estate = median(rep(REALPROP, weight)),
+      median_real_estate = median(rep(REALPROP, PERWT)),
       .groups = "drop"
     )
 
