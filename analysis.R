@@ -36,87 +36,88 @@ data <- raw %>%
       HISPAN >= 1 & HISPAN <= 4 ~ TRUE,
       .default = FALSE
     ),
-    # Clean up year variable
-    census_year = YEAR,
+    latino_origin = case_when(
+      HISPAND > 0 & HISPAND < 200 ~ "Mexican",
+      HISPAND == 200 ~ "Puerto Rican",
+      HISPAND == 300 ~ "Cuban",
+      HISPAND == 460 ~ "Dominican",
+      HISPAND >= 401 & HISPAND <= 417 ~ "Central American",
+      HISPAND >= 420 & HISPAND <= 431 ~ "South American",
+      HISPAND %in% c(450, 470, 480, 498) ~ "Other Latino",
+      .default = "Not Latino"
+    ),
   )
 
 # 1. Total Latino Population by Year (Person-level analysis)
 latino_pop_by_year <- data %>%
-  group_by(census_year) %>%
+  group_by(YEAR, latino_origin) %>%
   summarise(
-    total_population = sum(PERWT),
-    latino_population = sum(PERWT[latino == TRUE]),
+    population = sum(PERWT),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = latino_origin, values_from = population)
+
+# 2. Share Foreign Born among Latinos (Person-level analysis)
+foreign_born_latinos <- data %>%
+  filter(latino == TRUE) %>%
+  mutate(
+    # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
+    foreign_born = case_when(
+      BPL >= 1 & BPL <= 120 ~ FALSE, # US states and territories
+      BPL > 120 ~ TRUE, # Foreign countries
+      .default = NA
+    )
+  ) %>%
+  filter(!is.na(foreign_born)) %>%
+  group_by(YEAR) %>%
+  summarise(
+    total_latinos = sum(PERWT),
+    foreign_born_latinos = sum(ifelse(foreign_born == TRUE, PERWT, 0)),
     .groups = "drop"
   ) %>%
   mutate(
-    latino_percentage = round((latino_population / total_population) * 100, 2)
+    pct_foreign_born = 100 * foreign_born_latinos / total_latinos
   )
 
-print("Latino Population by Year:")
-print(latino_pop_by_year)
-
-# 2. Share Foreign Born among Latinos (Person-level analysis)
-if ("BPL" %in% names(data)) {
-  foreign_born_latinos <- data %>%
-    filter(latino == TRUE) %>%
-    mutate(
-      # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
-      foreign_born = case_when(
-        BPL >= 1 & BPL <= 120 ~ FALSE, # US states and territories
-        BPL > 120 ~ TRUE, # Foreign countries
-        TRUE ~ NA
-      )
-    ) %>%
-    filter(!is.na(foreign_born)) %>%
-    group_by(census_year) %>%
-    summarise(
-      total_latinos = sum(PERWT),
-      foreign_born_latinos = sum(PERWT[foreign_born == TRUE]),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      pct_foreign_born = round((foreign_born_latinos / total_latinos) * 100, 2)
-    )
-
-  print("Foreign Born Latinos by Year:")
-  print(foreign_born_latinos)
-}
-
 # 3. Citizenship Status among Latinos (Person-level analysis)
-if ("CITIZEN" %in% names(data)) {
-  citizenship_latinos <- data %>%
-    filter(latino == TRUE) %>%
-    filter(!is.na(CITIZEN) & CITIZEN != 0) %>%
-    mutate(
-      # Based on codebook: 1=Born abroad of American parents, 2=Naturalized, 3=Not citizen, 4=First papers
-      not_citizen = case_when(
-        CITIZEN == 1 ~ FALSE, # Born abroad of American parents (citizen)
-        CITIZEN == 2 ~ FALSE, # Naturalized citizen
-        CITIZEN == 3 ~ TRUE, # Not a citizen
-        CITIZEN == 4 ~ TRUE, # Not a citizen, but has received first papers
-        TRUE ~ NA
-      ),
-      first_papers = case_when(
-        CITIZEN == 4 ~ TRUE,
-        TRUE ~ FALSE
-      )
-    ) %>%
-    filter(!is.na(not_citizen)) %>%
-    group_by(census_year) %>%
-    summarise(
-      total_latinos = sum(PERWT),
-      not_citizens = sum(PERWT[not_citizen == TRUE]),
-      first_papers_only = sum(PERWT[first_papers == TRUE]),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      pct_not_citizen = round((not_citizens / total_latinos) * 100, 2),
-      pct_first_papers = round((first_papers_only / total_latinos) * 100, 2)
+citizenship_latinos <- data %>%
+  filter(latino == TRUE) %>%
+  filter(!is.na(CITIZEN) & CITIZEN != 0) %>%
+  mutate(
+    # Based on codebook: 1=Born abroad of American parents, 2=Naturalized, 3=Not citizen, 4=First papers
+    citizen = case_when(
+      CITIZEN == 1 ~ TRUE, # Born abroad of American parents (citizen)
+      CITIZEN == 2 ~ TRUE, # Naturalized citizen
+      CITIZEN == 3 ~ FALSE, # Not a citizen
+      CITIZEN == 4 ~ FALSE, # Not a citizen, but has received first papers
+      .default = NA
+    ),
+    not_citizen = case_when(
+      CITIZEN == 1 ~ FALSE, # Born abroad of American parents (citizen)
+      CITIZEN == 2 ~ FALSE, # Naturalized citizen
+      CITIZEN == 3 ~ TRUE, # Not a citizen
+      CITIZEN == 4 ~ TRUE, # Not a citizen, but has received first papers
+      .default = NA
+    ),
+    first_papers = case_when(
+      CITIZEN == 4 ~ TRUE,
+      TRUE ~ FALSE
     )
-
-  print("Citizenship Status among Latinos:")
-  print(citizenship_latinos)
-}
+  ) %>%
+  filter(!is.na(citizen)) %>%
+  group_by(YEAR) %>%
+  summarise(
+    total_latinos = sum(PERWT),
+    citizens = sum(ifelse(citizen == TRUE, PERWT, 0)),
+    not_citizens = sum(ifelse(not_citizen == TRUE, PERWT, 0)),
+    first_papers_only = sum(ifelse(first_papers == TRUE, PERWT, 0)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pct_citizen = 100 * citizens / total_latinos,
+    pct_not_citizen = 100 * not_citizens / total_latinos,
+    pct_first_papers = 100 * first_papers_only / total_latinos
+  )
 
 # 4. Latino Subgroup Analysis (Person-level analysis)
 latino_subgroups <- data %>%
@@ -136,12 +137,12 @@ latino_subgroups <- data %>%
       TRUE ~ "Hispanic/Latino (unspecified)"
     )
   ) %>%
-  group_by(census_year, latino_origin) %>%
+  group_by(YEAR, latino_origin) %>%
   summarise(
     count = sum(PERWT),
     .groups = "drop"
   ) %>%
-  group_by(census_year) %>%
+  group_by(YEAR) %>%
   mutate(
     total_latinos_year = sum(count),
     percentage = round((count / total_latinos_year) * 100, 2)
@@ -168,12 +169,12 @@ if ("REGION" %in% names(data)) {
         TRUE ~ as.character(REGION)
       )
     ) %>%
-    group_by(census_year, region_name) %>%
+    group_by(YEAR, region_name) %>%
     summarise(
       latino_count = sum(PERWT),
       .groups = "drop"
     ) %>%
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     mutate(
       total_latinos_year = sum(latino_count),
       percentage = round((latino_count / total_latinos_year) * 100, 2)
@@ -187,14 +188,14 @@ if ("REGION" %in% names(data)) {
 if ("OCC" %in% names(data)) {
   top_occupations <- data %>%
     filter(latino == TRUE & !is.na(OCC) & OCC != 0) %>%
-    group_by(census_year, OCC) %>%
+    group_by(YEAR, OCC) %>%
     summarise(
       count = sum(PERWT),
       .groups = "drop"
     ) %>%
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     slice_max(count, n = 3) %>%
-    arrange(census_year, desc(count)) %>%
+    arrange(YEAR, desc(count)) %>%
     mutate(rank = row_number())
 
   print("Top 3 Occupations among Latinos by Year:")
@@ -214,7 +215,7 @@ if ("CLASSWKR" %in% names(data)) {
       )
     ) %>%
     filter(!is.na(self_employed)) %>%
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     summarise(
       total_latinos = sum(PERWT),
       self_employed_latinos = sum(PERWT[self_employed == TRUE]),
@@ -241,7 +242,7 @@ if ("FARM" %in% names(data)) {
       )
     ) %>%
     filter(!is.na(has_farm)) %>%
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     summarise(
       total_latino_households = sum(HHWT),
       latino_farm_households = sum(HHWT[has_farm == TRUE]),
@@ -268,7 +269,7 @@ if ("OWNERSHP" %in% names(data)) {
       )
     ) %>%
     filter(!is.na(owns_home)) %>%
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     summarise(
       total_latino_households = sum(HHWT),
       latino_homeowners = sum(HHWT[owns_home == TRUE]),
@@ -286,7 +287,7 @@ if ("OWNERSHP" %in% names(data)) {
 if ("VALUEH" %in% names(data)) {
   home_values <- data %>%
     filter(latino == TRUE & !is.na(VALUEH) & VALUEH > 0 & VALUEH < 9999999 & PERNUM == 1) %>% # Use only householder records
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     summarise(
       median_home_value = median(rep(VALUEH, HHWT)),
       .groups = "drop"
@@ -300,7 +301,7 @@ if ("VALUEH" %in% names(data)) {
 if ("HHINCOME" %in% names(data)) {
   household_income <- data %>%
     filter(latino == TRUE & !is.na(HHINCOME) & HHINCOME > 0 & HHINCOME < 9999999 & PERNUM == 1) %>% # Use only householder records
-    group_by(census_year) %>%
+    group_by(YEAR) %>%
     summarise(
       median_hh_income = median(rep(HHINCOME, HHWT)),
       .groups = "drop"
@@ -313,7 +314,7 @@ if ("HHINCOME" %in% names(data)) {
 # 12. Real Estate Value (1850 only) (Person-level analysis)
 if ("REALPROP" %in% names(data)) {
   real_estate_1850 <- data %>%
-    filter(latino == TRUE & census_year == 1850 & !is.na(REALPROP) & REALPROP > 0) %>%
+    filter(latino == TRUE & YEAR == 1850 & !is.na(REALPROP) & REALPROP > 0) %>%
     summarise(
       median_real_estate = median(rep(REALPROP, PERWT)),
       .groups = "drop"
@@ -353,12 +354,12 @@ for (year in template_years) {
 }
 
 # Fill in the data where available
-available_years <- unique(data$census_year)
+available_years <- unique(data$YEAR)
 
 # 1. Total Latino Population
 for (year in available_years) {
   if (year %in% template_years) {
-    year_data <- latino_pop_by_year[latino_pop_by_year$census_year == year, ]
+    year_data <- latino_pop_by_year[latino_pop_by_year$YEAR == year, ]
     if (nrow(year_data) > 0) {
       output_df[1, as.character(year)] <- formatC(year_data$latino_population, format = "f", digits = 0, big.mark = ",")
     }
@@ -369,7 +370,7 @@ for (year in available_years) {
 if (exists("foreign_born_latinos")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- foreign_born_latinos[foreign_born_latinos$census_year == year, ]
+      year_data <- foreign_born_latinos[foreign_born_latinos$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[2, as.character(year)] <- paste0(year_data$pct_foreign_born, "%")
       }
@@ -381,7 +382,7 @@ if (exists("foreign_born_latinos")) {
 if (exists("citizenship_latinos")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- citizenship_latinos[citizenship_latinos$census_year == year, ]
+      year_data <- citizenship_latinos[citizenship_latinos$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[3, as.character(year)] <- paste0(year_data$pct_not_citizen, "%")
         output_df[4, as.character(year)] <- paste0(year_data$pct_first_papers, "%")
@@ -394,7 +395,7 @@ if (exists("citizenship_latinos")) {
 if (exists("business_ownership")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- business_ownership[business_ownership$census_year == year, ]
+      year_data <- business_ownership[business_ownership$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[8, as.character(year)] <- paste0(year_data$pct_self_employed, "%")
       }
@@ -406,7 +407,7 @@ if (exists("business_ownership")) {
 if (exists("farm_status")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- farm_status[farm_status$census_year == year, ]
+      year_data <- farm_status[farm_status$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[9, as.character(year)] <- paste0(year_data$pct_farm_households, "%")
       }
@@ -418,7 +419,7 @@ if (exists("farm_status")) {
 if (exists("homeownership")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- homeownership[homeownership$census_year == year, ]
+      year_data <- homeownership[homeownership$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[10, as.character(year)] <- paste0(year_data$pct_homeowners, "%")
       }
@@ -430,7 +431,7 @@ if (exists("homeownership")) {
 if (exists("home_values")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- home_values[home_values$census_year == year, ]
+      year_data <- home_values[home_values$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[11, as.character(year)] <- paste0("$", formatC(year_data$median_home_value, format = "f", digits = 0, big.mark = ","))
       }
@@ -442,7 +443,7 @@ if (exists("home_values")) {
 if (exists("household_income")) {
   for (year in available_years) {
     if (year %in% template_years) {
-      year_data <- household_income[household_income$census_year == year, ]
+      year_data <- household_income[household_income$YEAR == year, ]
       if (nrow(year_data) > 0) {
         output_df[12, as.character(year)] <- paste0("$", formatC(year_data$median_hh_income, format = "f", digits = 0, big.mark = ","))
       }
