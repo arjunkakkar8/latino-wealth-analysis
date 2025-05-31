@@ -48,18 +48,24 @@ data <- raw %>%
     ),
   )
 
+summarization_data <- rbind(
+  data %>% filter(latino == TRUE),
+  data %>%
+    filter(latino == TRUE) %>%
+    mutate(latino_origin = "Total")
+)
+
 # 1. Total Latino Population by Year (Person-level analysis)
-latino_pop_by_year <- data %>%
-  group_by(YEAR, latino_origin) %>%
+latino_pop_by_year <- summarization_data %>%
+  group_by(YEAR, group = latino_origin) %>%
   summarise(
-    population = sum(PERWT),
+    value = sum(PERWT),
     .groups = "drop"
   ) %>%
-  pivot_wider(names_from = latino_origin, values_from = population)
+  pivot_wider(names_from = group, values_from = value)
 
 # 2. Share Foreign Born among Latinos (Person-level analysis)
-foreign_born_latinos <- data %>%
-  filter(latino == TRUE) %>%
+foreign_born_latinos <- summarization_data %>%
   mutate(
     # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
     foreign_born = case_when(
@@ -69,15 +75,17 @@ foreign_born_latinos <- data %>%
     )
   ) %>%
   filter(!is.na(foreign_born)) %>%
-  group_by(YEAR) %>%
+  group_by(YEAR, group = latino_origin) %>%
   summarise(
-    total_latinos = sum(PERWT),
-    foreign_born_latinos = sum(ifelse(foreign_born == TRUE, PERWT, 0)),
+    value = sum(PERWT),
+    filtered_value = sum(ifelse(foreign_born == TRUE, PERWT, 0)),
     .groups = "drop"
   ) %>%
   mutate(
-    pct_foreign_born = 100 * foreign_born_latinos / total_latinos
-  )
+    percent_filtered = 100 * filtered_value / value
+  ) %>%
+  select(-value, -filtered_value) %>%
+  pivot_wider(names_from = group, values_from = percent_filtered)
 
 # 3. Citizenship Status among Latinos (Person-level analysis)
 citizenship_latinos <- data %>%
