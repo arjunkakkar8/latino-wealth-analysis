@@ -1,2 +1,3 @@
 # Ignore big data files
 *.dat.gz
+.DS_Store
