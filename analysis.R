@@ -1,9 +1,12 @@
 library(tidyverse)
 library(spatstat)
 library(ipumsr)
+library(arrow)
 
 # read in data
 raw <- read_ipums_micro("data/USA Data 00006.xml", data_file = "data/USA Data 00006.dat.gz")
+
+raw <- read_csv_arrow("data/usa_00010.csv")
 
 # examine data structure
 glimpse(raw)
@@ -14,10 +17,8 @@ table(raw$YEAR)
 
 # examine Hispanic/Latino variables
 table(raw$HISPAN, useNA = "always")
-table(raw$HISPRULE, useNA = "always")
 
 # examine other key variables
-table(raw$BPL, useNA = "always") # birthplace
 table(raw$CITIZEN, useNA = "always") # citizenship
 table(raw$REGION, useNA = "always") # region
 # occupation
@@ -30,7 +31,7 @@ summary(raw$HHINCOME) # household income
 summary(raw$REALPROP) # real estate property
 
 # Define Latino population based on HISPAN and HISPRULE variables
-data <- raw %>%
+data <- raw |>
   mutate(
     # Create Latino identifier based on codebook: HISPAN codes 1-4 are Hispanic, 0=Not Hispanic
     latino = case_when(
@@ -47,13 +48,20 @@ data <- raw %>%
       HISPAND %in% c(450, 470, 480, 498) ~ "Other Latino",
       .default = "Not Latino"
     ),
+    region_name = case_when(
+      REGION >= 11 & REGION <= 13 ~ "Northeast",
+      REGION >= 21 & REGION <= 23 ~ "Midwest",
+      REGION >= 31 & REGION <= 34 ~ "South",
+      REGION >= 41 & REGION <= 43 ~ "West",
+      .default = NA
+    )
   )
 
 summarization_data <- rbind(
   data %>% filter(latino == TRUE),
   data %>%
     filter(latino == TRUE) %>%
-    mutate(latino_origin = "Total")
+    mutate(latino_origin = "Total", region_name = "Total")
 )
 
 household_summarization_data <- summarization_data %>%
@@ -72,7 +80,7 @@ write_csv(latino_pop_by_year, "output/population.csv")
 
 
 # 2. Share Foreign Born among Latinos (Person-level analysis)
-foreign_born_latinos <- summarization_data %>%
+foreign_born_latinos_origin <- summarization_data %>%
   mutate(
     # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
     foreign_born = case_when(
@@ -94,11 +102,35 @@ foreign_born_latinos <- summarization_data %>%
   select(-value, -filtered_value) %>%
   pivot_wider(names_from = group, values_from = percent_filtered)
 
-write_csv(foreign_born_latinos, "output/foreign_born.csv")
+write_csv(foreign_born_latinos_origin, "output/foreign_born_origin.csv")
+
+foreign_born_latinos_region <- summarization_data %>%
+  mutate(
+    # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
+    foreign_born = case_when(
+      BPL >= 1 & BPL <= 120 ~ FALSE, # US states and territories
+      BPL > 120 ~ TRUE, # Foreign countries
+      .default = NA
+    ),
+  ) %>%
+  filter(!is.na(foreign_born) & !is.na(region_name)) %>%
+  group_by(YEAR, group = region_name) %>%
+  summarise(
+    value = sum(PERWT),
+    filtered_value = sum(ifelse(foreign_born == TRUE, PERWT, 0)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    percent_filtered = 100 * filtered_value / value
+  ) %>%
+  select(-value, -filtered_value) %>%
+  pivot_wider(names_from = group, values_from = percent_filtered)
+
+write_csv(foreign_born_latinos_region, "output/foreign_born_region.csv")
 
 
 # 3. Citizenship Status among Latinos (Person-level analysis)
-citizenship_latinos <- summarization_data %>%
+citizenship_latinos_origin <- summarization_data %>%
   filter(!is.na(CITIZEN) & CITIZEN != 0) %>%
   mutate(
     # Based on codebook: 1=Born abroad of American parents, 2=Naturalized, 3=Not citizen, 4=First papers
@@ -106,13 +138,34 @@ citizenship_latinos <- summarization_data %>%
       CITIZEN == 1 ~ TRUE, # Born abroad of American parents (citizen)
       CITIZEN == 2 ~ TRUE, # Naturalized citizen
       CITIZEN == 3 ~ FALSE, # Not a citizen
-      CITIZEN == 4 ~ FALSE, # Not a citizen, but has received first papers
+      CITIZEN == 4 ~ TRUE, # Not a citizen, but has received first papers
       .default = NA
     ),
-    not_citizen = case_when(
-      CITIZEN == 1 ~ FALSE, # Born abroad of American parents (citizen)
-      CITIZEN == 2 ~ FALSE, # Naturalized citizen
-      CITIZEN == 3 ~ TRUE, # Not a citizen
+  ) %>%
+  filter(!is.na(citizen)) %>%
+  group_by(YEAR, group = latino_origin) %>%
+  summarise(
+    total_latinos = sum(PERWT),
+    citizens = sum(ifelse(citizen == TRUE, PERWT, 0)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pct_citizen = 100 * citizens / total_latinos,
+  ) %>%
+  select(YEAR, group, pct_citizen) %>%
+  pivot_wider(names_from = group, values_from = pct_citizen)
+
+write_csv(citizenship_latinos_origin, "output/citizenship_origin.csv")
+
+
+citizenship_latinos_region <- summarization_data %>%
+  filter(!is.na(CITIZEN) & CITIZEN != 0) %>%
+  mutate(
+    # Based on codebook: 1=Born abroad of American parents, 2=Naturalized, 3=Not citizen, 4=First papers
+    citizen = case_when(
+      CITIZEN == 1 ~ TRUE, # Born abroad of American parents (citizen)
+      CITIZEN == 2 ~ TRUE, # Naturalized citizen
+      CITIZEN == 3 ~ FALSE, # Not a citizen
       CITIZEN == 4 ~ TRUE, # Not a citizen, but has received first papers
       .default = NA
     ),
@@ -121,40 +174,24 @@ citizenship_latinos <- summarization_data %>%
       TRUE ~ FALSE
     )
   ) %>%
-  filter(!is.na(citizen)) %>%
-  group_by(YEAR, group = latino_origin) %>%
+  filter(!is.na(citizen) & !is.na(region_name)) %>%
+  group_by(YEAR, group = region_name) %>%
   summarise(
     total_latinos = sum(PERWT),
     citizens = sum(ifelse(citizen == TRUE, PERWT, 0)),
-    not_citizens = sum(ifelse(not_citizen == TRUE, PERWT, 0)),
     first_papers_only = sum(ifelse(first_papers == TRUE, PERWT, 0)),
     .groups = "drop"
   ) %>%
   mutate(
     pct_citizen = 100 * citizens / total_latinos,
-    pct_not_citizen = 100 * not_citizens / total_latinos,
-    pct_first_papers = 100 * first_papers_only / total_latinos
   ) %>%
-  select(YEAR, group, pct_citizen, pct_not_citizen, pct_first_papers) %>%
-  pivot_longer(
-    cols = c(pct_citizen, pct_not_citizen, pct_first_papers),
-    names_to = "metric", values_to = "value"
-  ) %>%
-  pivot_wider(names_from = group, values_from = value)
+  select(YEAR, group, pct_citizen) %>%
+  pivot_wider(names_from = group, values_from = pct_citizen)
 
-write_csv(citizenship_latinos, "output/citizenship.csv")
+write_csv(citizenship_latinos_region, "output/citizenship_region.csv")
 
 # 5. Latino Population by Region (Person-level analysis)
 latino_by_region <- summarization_data %>%
-  mutate(
-    region_name = case_when(
-      REGION >= 11 & REGION <= 13 ~ "Northeast",
-      REGION >= 21 & REGION <= 23 ~ "Midwest",
-      REGION >= 31 & REGION <= 34 ~ "South",
-      REGION >= 41 & REGION <= 43 ~ "West",
-      .default = NA
-    )
-  ) %>%
   filter(!is.na(region_name)) %>%
   group_by(YEAR, group = latino_origin, region_name) %>%
   summarise(
@@ -190,6 +227,15 @@ top_occupations <- summarization_data %>%
   pivot_wider(names_from = group, values_from = c(OCC, count), names_sep = "_")
 
 write_csv(top_occupations, "output/top_occupations.csv")
+
+education <- summarization_data %>%
+  filter(EDUCD >= 2 & EDUCD <= 116) %>%
+  group_by(YEAR, group = latino_origin) %>%
+  summarise(
+    total_latinos = sum(PERWT),
+    bachelors_above = sum(ifelse(EDUCD > 100, PERWT, 0)),
+    .groups = "drop"
+  )
 
 
 # 7. Business Ownership among Latinos (Person-level analysis)
@@ -246,7 +292,7 @@ write_csv(farm_status, "output/farm_status.csv")
 
 
 # 9. Homeownership among Latino Households (Household-level analysis)
-homeownership <- household_summarization_data %>%
+homeownership_origin <- household_summarization_data %>%
   mutate(
     # Based on codebook: 1=Owned or being bought (loan), 2=Rented
     owns_home = case_when(
@@ -268,11 +314,36 @@ homeownership <- household_summarization_data %>%
   select(YEAR, group, pct_homeowners) %>%
   pivot_wider(names_from = group, values_from = pct_homeowners)
 
-write_csv(homeownership, "output/homeownership.csv")
+write_csv(homeownership_origin, "output/homeownership_origin.csv")
+
+
+homeownership_region <- household_summarization_data %>%
+  mutate(
+    # Based on codebook: 1=Owned or being bought (loan), 2=Rented
+    owns_home = case_when(
+      OWNERSHP == 1 ~ TRUE, # Owned or being bought (loan)
+      OWNERSHP == 2 ~ FALSE, # Rented
+      .default = NA
+    )
+  ) %>%
+  filter(!is.na(owns_home), !is.na(region_name)) %>%
+  group_by(YEAR, group = region_name) %>%
+  summarise(
+    total_latino_households = sum(HHWT),
+    latino_homeowners = sum(ifelse(owns_home == TRUE, HHWT, 0)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pct_homeowners = 100 * latino_homeowners / total_latino_households
+  ) %>%
+  select(YEAR, group, pct_homeowners) %>%
+  pivot_wider(names_from = group, values_from = pct_homeowners)
+
+write_csv(homeownership_region, "output/homeownership_region.csv")
 
 
 # 10. Median Home Value among Latino Homeowners (Household-level analysis)
-home_values <- household_summarization_data %>%
+home_values_origin <- household_summarization_data %>%
   filter(!is.na(VALUEH) & VALUEH > 0 & VALUEH < 9999998) %>%
   group_by(YEAR, group = latino_origin) %>%
   summarise(
@@ -282,11 +353,22 @@ home_values <- household_summarization_data %>%
   select(YEAR, group, median_home_value) %>%
   pivot_wider(names_from = group, values_from = median_home_value)
 
-write_csv(home_values, "output/home_values.csv")
+write_csv(home_values_origin, "output/home_values_origin.csv")
 
+home_values_region <- household_summarization_data %>%
+  filter(!is.na(VALUEH) & VALUEH > 0 & VALUEH < 9999998 & !is.na(region_name)) %>%
+  group_by(YEAR, group = region_name) %>%
+  summarise(
+    median_home_value = weighted.median(VALUEH, HHWT),
+    .groups = "drop"
+  ) %>%
+  select(YEAR, group, median_home_value) %>%
+  pivot_wider(names_from = group, values_from = median_home_value)
+
+write_csv(home_values_region, "output/home_values_region.csv")
 
 # 11. Median Household Income among Latino Households (Household-level analysis)
-household_income <- household_summarization_data %>%
+household_income_origin <- household_summarization_data %>%
   filter(!is.na(HHINCOME) & HHINCOME < 9999999) %>%
   group_by(YEAR, group = latino_origin) %>%
   summarise(
@@ -296,7 +378,19 @@ household_income <- household_summarization_data %>%
   select(YEAR, group, median_hh_income) %>%
   pivot_wider(names_from = group, values_from = median_hh_income)
 
-write_csv(household_income, "output/household_income.csv")
+write_csv(household_income_origin, "output/household_income_origin.csv")
+
+household_income_region <- household_summarization_data %>%
+  filter(!is.na(HHINCOME) & HHINCOME < 9999999 & !is.na(region_name)) %>%
+  group_by(YEAR, group = region_name) %>%
+  summarise(
+    median_hh_income = weighted.median(HHINCOME, HHWT),
+    .groups = "drop"
+  ) %>%
+  select(YEAR, group, median_hh_income) %>%
+  pivot_wider(names_from = group, values_from = median_hh_income)
+
+write_csv(household_income_region, "output/household_income_region.csv")
 
 
 # 12. Real Estate Value (1850 only) (Person-level analysis)
