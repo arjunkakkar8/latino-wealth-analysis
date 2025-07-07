@@ -56,9 +56,7 @@ calculate_with_se <- function(data, computation_fn, weight_type = "person") {
 }
 
 # read in data
-raw <- read_ipums_micro("data/USA Data 00006.xml", data_file = "data/USA Data 00006.dat.gz")
-
-raw <- read_csv_arrow("data/usa_00010.csv")
+raw <- read_csv_arrow("data/usa_00011.csv")
 
 # examine data structure
 glimpse(raw)
@@ -316,14 +314,49 @@ top_occupations <- summarization_data %>%
 
 write_csv(top_occupations, "output/top_occupations.csv")
 
-education <- summarization_data %>%
-  filter(EDUCD >= 2 & EDUCD <= 116) %>%
-  group_by(YEAR, group = latino_origin) %>%
-  summarise(
-    total_latinos = sum(PERWT),
-    bachelors_above = sum(ifelse(EDUCD > 100, PERWT, 0)),
-    .groups = "drop"
-  )
+education_origin <- calculate_with_se(
+  data = summarization_data %>%
+    filter(EDUCD >= 2 & EDUCD <= 116),
+  computation_fn = function(data) {
+    data %>%
+      group_by(YEAR, group = latino_origin) %>%
+      summarise(
+        total_latinos = sum(weight),
+        bachelors_above = sum(ifelse(EDUCD > 100, weight, 0)),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        pct = 100 * bachelors_above / total_latinos
+      ) %>%
+      select(YEAR, group, pct) %>%
+      pivot_wider(names_from = group, values_from = pct)
+  },
+  weight_type = "person"
+)
+
+write_csv(education_origin, "output/education_origin.csv")
+
+education_region <- calculate_with_se(
+  data = summarization_data %>%
+    filter(EDUCD >= 2 & EDUCD <= 116 & !is.na(region_name)),
+  computation_fn = function(data) {
+    data %>%
+      group_by(YEAR, group = region_name) %>%
+      summarise(
+        total_latinos = sum(weight),
+        bachelors_above = sum(ifelse(EDUCD > 100, weight, 0)),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        pct = 100 * bachelors_above / total_latinos
+      ) %>%
+      select(YEAR, group, pct) %>%
+      pivot_wider(names_from = group, values_from = pct)
+  },
+  weight_type = "person"
+)
+
+write_csv(education_region, "output/education_region.csv")
 
 
 # 7. Business Ownership among Latinos (Person-level analysis)
