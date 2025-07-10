@@ -56,7 +56,7 @@ calculate_with_se <- function(data, computation_fn, weight_type = "person") {
 }
 
 # read in data
-raw <- read_csv_arrow("data/usa_00011.csv")
+raw <- read_csv_arrow("data/usa_00012.csv")
 
 # examine data structure
 glimpse(raw)
@@ -104,7 +104,13 @@ data <- raw |>
       REGION >= 31 & REGION <= 34 ~ "South",
       REGION >= 41 & REGION <= 43 ~ "West",
       .default = NA
-    )
+    ),
+    race = case_when(
+      latino == TRUE ~ NA,
+      RACE == 1 ~ "White",
+      RACE == 2 ~ "Black",
+      .default = NA
+    ),
   )
 
 summarization_data <- rbind(
@@ -134,6 +140,59 @@ latino_pop_by_year <- calculate_with_se(
 
 write_csv(latino_pop_by_year, "output/population.csv")
 
+
+foreign_born <- function(data, groupVariable) {
+  return(calculate_with_se(
+    data = data %>%
+      mutate(
+        # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
+        foreign_born = case_when(
+          BPL >= 1 & BPL <= 120 ~ FALSE, # US states and territories
+          BPL > 120 ~ TRUE, # Foreign countries
+          .default = NA
+        )
+      ) %>%
+      filter(!is.na(foreign_born)),
+    computation_fn = function(data) {
+      data %>%
+        group_by(YEAR, group = !!sym(groupVariable)) %>%
+        summarise(
+          value = sum(weight),
+          filtered_value = sum(ifelse(foreign_born == TRUE, weight, 0)),
+          .groups = "drop"
+        ) %>%
+        mutate(
+          percent_filtered = 100 * filtered_value / value
+        ) %>%
+        select(-value, -filtered_value) %>%
+        pivot_wider(names_from = group, values_from = percent_filtered)
+    },
+    weight_type = "person"
+  ))
+}
+
+foreign_born_latinos_origin <- foreign_born(
+  data = summarization_data,
+  "latino_origin"
+)
+
+foreign_born_latinos_region <- foreign_born(
+  data = summarization_data %>%
+    filter(!is.na(region_name)),
+  "region_name"
+)
+
+foreign_born_mexican_region <- foreign_born(
+  data = summarization_data %>%
+    filter(latino_origin == "Mexican" & !is.na(region_name)),
+  "region_name"
+)
+
+foreign_born_race <- foreign_born(
+  data = summarization_data %>%
+    filter(!is.na(race)),
+  "race"
+)
 
 # 2. Share Foreign Born among Latinos (Person-level analysis)
 foreign_born_latinos_origin <- calculate_with_se(
@@ -316,7 +375,7 @@ write_csv(top_occupations, "output/top_occupations.csv")
 
 education_origin <- calculate_with_se(
   data = summarization_data %>%
-    filter(EDUCD >= 2 & EDUCD <= 116),
+    filter(EDUCD >= 2 & EDUCD <= 116 & AGE >= 25),
   computation_fn = function(data) {
     data %>%
       group_by(YEAR, group = latino_origin) %>%
