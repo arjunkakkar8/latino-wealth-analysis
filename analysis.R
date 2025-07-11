@@ -27,11 +27,14 @@ calculate_with_se <- function(data, computation_fn, weight_type = "person") {
 
   # Calculate replicate estimates
   rep_estimates <- map_dfr(rep_weights, function(rep_wt) {
-    data_with_rep_weight <- data %>%
-      mutate(weight = !!sym(rep_wt))
-
-    result <- computation_fn(data_with_rep_weight)
-    return(result)
+    if (rep_wt %in% names(data)) {
+      data %>%
+        mutate(weight = !!sym(rep_wt)) %>%
+        computation_fn() %>%
+        return()
+    } else {
+      return(main_estimate)
+    }
   })
 
   # Calculate standard errors
@@ -58,8 +61,8 @@ calculate_with_se <- function(data, computation_fn, weight_type = "person") {
 }
 
 # read in data
-raw <- read_csv_arrow("data/usa_00015.csv.gz")
-fragment <- "modern"
+raw <- read_csv_arrow("data/usa_00016.csv.gz")
+fragment <- "historical"
 
 # examine data structure
 glimpse(raw)
@@ -114,7 +117,8 @@ data <- raw |>
       RACE == 2 ~ "Black",
       .default = NA
     ),
-  )
+  ) %>%
+  select(-starts_with("REPWT"))
 
 summarization_data <- rbind(
   data %>% filter(latino == TRUE),
