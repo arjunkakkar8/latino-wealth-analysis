@@ -4,6 +4,8 @@ library(ipumsr)
 library(rlang)
 library(arrow)
 
+mem.maxVSize(50000)
+
 # Wrapper function to calculate estimates with standard errors using replicate weights
 calculate_with_se <- function(data, computation_fn, weight_type = "person") {
   # Determine which replicate weights to use
@@ -56,7 +58,8 @@ calculate_with_se <- function(data, computation_fn, weight_type = "person") {
 }
 
 # read in data
-raw <- read_csv_arrow("data/usa_00012.csv")
+raw <- read_csv_arrow("data/usa_00015.csv.gz")
+fragment <- "modern"
 
 # examine data structure
 glimpse(raw)
@@ -138,12 +141,12 @@ latino_pop_by_year <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(latino_pop_by_year, "output/population.csv")
+write_csv(latino_pop_by_year, paste0("output/population_", fragment, ".csv"))
 
 
 foreign_born <- function(data, groupVariable) {
   return(calculate_with_se(
-    data = data %>%
+    data %>%
       mutate(
         # Based on codebook: BPL codes 001-120 are US states/territories, >120 are foreign countries
         foreign_born = case_when(
@@ -153,7 +156,7 @@ foreign_born <- function(data, groupVariable) {
         )
       ) %>%
       filter(!is.na(foreign_born)),
-    computation_fn = function(data) {
+    function(data) {
       data %>%
         group_by(YEAR, group = !!sym(groupVariable)) %>%
         summarise(
@@ -172,27 +175,35 @@ foreign_born <- function(data, groupVariable) {
 }
 
 foreign_born_latinos_origin <- foreign_born(
-  data = summarization_data,
+  summarization_data,
   "latino_origin"
 )
 
+write_csv(foreign_born_latinos_origin, paste0("output/foreign_born_origin_", fragment, ".csv"))
+
 foreign_born_latinos_region <- foreign_born(
-  data = summarization_data %>%
+  summarization_data %>%
     filter(!is.na(region_name)),
   "region_name"
 )
 
+write_csv(foreign_born_latinos_region, paste0("output/foreign_born_latinos_region_", fragment, ".csv"))
+
 foreign_born_mexican_region <- foreign_born(
-  data = summarization_data %>%
+  summarization_data %>%
     filter(latino_origin == "Mexican" & !is.na(region_name)),
   "region_name"
 )
 
+write_csv(foreign_born_mexican_region, paste0("output/foreign_born_mexican_region_", fragment, ".csv"))
+
 foreign_born_race <- foreign_born(
-  data = summarization_data %>%
+  data %>%
     filter(!is.na(race)),
   "race"
 )
+
+write_csv(foreign_born_race, paste0("output/foreign_born_race_", fragment, ".csv"))
 
 # 2. Share Foreign Born among Latinos (Person-level analysis)
 foreign_born_latinos_origin <- calculate_with_se(
@@ -223,7 +234,7 @@ foreign_born_latinos_origin <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(foreign_born_latinos_origin, "output/foreign_born_origin.csv")
+write_csv(foreign_born_latinos_origin, paste0("output/foreign_born_origin_", fragment, ".csv"))
 
 foreign_born_latinos_region <- calculate_with_se(
   data = summarization_data %>%
@@ -253,7 +264,7 @@ foreign_born_latinos_region <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(foreign_born_latinos_region, "output/foreign_born_region.csv")
+write_csv(foreign_born_latinos_region, paste0("output/foreign_born_region_", fragment, ".csv"))
 
 
 # 3. Citizenship Status among Latinos (Person-level analysis)
@@ -288,7 +299,7 @@ citizenship_latinos_origin <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(citizenship_latinos_origin, "output/citizenship_origin.csv")
+write_csv(citizenship_latinos_origin, paste0("output/citizenship_origin_", fragment, ".csv"))
 
 
 citizenship_latinos_region <- calculate_with_se(
@@ -327,7 +338,7 @@ citizenship_latinos_region <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(citizenship_latinos_region, "output/citizenship_region.csv")
+write_csv(citizenship_latinos_region, paste0("output/citizenship_region_", fragment, ".csv"))
 
 # 5. Latino Population by Region (Person-level analysis)
 latino_by_region <- calculate_with_se(
@@ -352,7 +363,7 @@ latino_by_region <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(latino_by_region, "output/population_by_region.csv")
+write_csv(latino_by_region, paste0("output/population_by_region_", fragment, ".csv"))
 
 
 # 6. Top 3 Occupations among Latinos (Person-level analysis)
@@ -371,7 +382,7 @@ top_occupations <- summarization_data %>%
   ungroup() %>%
   pivot_wider(names_from = group, values_from = c(OCC, count), names_sep = "_")
 
-write_csv(top_occupations, "output/top_occupations.csv")
+write_csv(top_occupations, paste0("output/top_occupations_", fragment, ".csv"))
 
 education_origin <- calculate_with_se(
   data = summarization_data %>%
@@ -393,7 +404,7 @@ education_origin <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(education_origin, "output/education_origin.csv")
+write_csv(education_origin, paste0("output/education_origin_", fragment, ".csv"))
 
 education_region <- calculate_with_se(
   data = summarization_data %>%
@@ -415,7 +426,7 @@ education_region <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(education_region, "output/education_region.csv")
+write_csv(education_region, paste0("output/education_region_", fragment, ".csv"))
 
 
 # 7. Business Ownership among Latinos (Person-level analysis)
@@ -448,7 +459,7 @@ business_ownership <- calculate_with_se(
   weight_type = "person"
 )
 
-write_csv(business_ownership, "output/business_ownership.csv")
+write_csv(business_ownership, paste0("output/business_ownership_", fragment, ".csv"))
 
 
 # 8. Farm Status among Latino Households (Household-level analysis)
@@ -480,7 +491,7 @@ farm_status <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(farm_status, "output/farm_status.csv")
+write_csv(farm_status, paste0("output/farm_status_", fragment, ".csv"))
 
 
 # 9. Homeownership among Latino Households (Household-level analysis)
@@ -512,7 +523,7 @@ homeownership_origin <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(homeownership_origin, "output/homeownership_origin.csv")
+write_csv(homeownership_origin, paste0("output/homeownership_origin_", fragment, ".csv"))
 
 
 homeownership_region <- calculate_with_se(
@@ -543,7 +554,7 @@ homeownership_region <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(homeownership_region, "output/homeownership_region.csv")
+write_csv(homeownership_region, paste0("output/homeownership_region_", fragment, ".csv"))
 
 
 # 10. Median Home Value among Latino Homeowners (Household-level analysis)
@@ -564,7 +575,7 @@ home_values_origin <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(home_values_origin, "output/home_values_origin.csv")
+write_csv(home_values_origin, paste0("output/home_values_origin_", fragment, ".csv"))
 
 home_values_region <- calculate_with_se(
   data = household_summarization_data %>%
@@ -583,7 +594,7 @@ home_values_region <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(home_values_region, "output/home_values_region.csv")
+write_csv(home_values_region, paste0("output/home_values_region_", fragment, ".csv"))
 
 # 11. Median Household Income among Latino Households (Household-level analysis)
 household_income_origin <- calculate_with_se(
@@ -603,7 +614,7 @@ household_income_origin <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(household_income_origin, "output/household_income_origin.csv")
+write_csv(household_income_origin, paste0("output/household_income_origin_", fragment, ".csv"))
 
 household_income_region <- calculate_with_se(
   data = household_summarization_data %>%
@@ -622,7 +633,7 @@ household_income_region <- calculate_with_se(
   weight_type = "household"
 )
 
-write_csv(household_income_region, "output/household_income_region.csv")
+write_csv(household_income_region, paste0("output/household_income_region_", fragment, ".csv"))
 
 
 # 12. Real Estate Value (1850 only) (Person-level analysis)
@@ -636,4 +647,4 @@ real_estate_1850 <- household_summarization_data %>%
   select(YEAR, group, median_real_estate) %>%
   pivot_wider(names_from = group, values_from = median_real_estate)
 
-write_csv(real_estate_1850, "output/real_estate.csv")
+write_csv(real_estate_1850, paste0("output/real_estate_", fragment, ".csv"))
