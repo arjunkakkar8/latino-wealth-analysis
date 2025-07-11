@@ -1,6 +1,5 @@
 library(tidyverse)
 library(spatstat)
-library(ipumsr)
 library(rlang)
 library(arrow)
 
@@ -127,16 +126,19 @@ data <- raw |>
   compute()
 
 summarization_data <- rbind(
-  data %>% filter(latino == TRUE) %>% compute(),
+  data %>% filter(latino == TRUE) %>% collect(),
   data %>%
     filter(latino == TRUE) %>%
     mutate(latino_origin = "Total", region_name = "Total") %>%
-    compute()
+    collect()
 )
 
+race_summarization_data <- data %>%
+  filter(!is.na(race)) %>%
+  collect()
+
 household_summarization_data <- summarization_data %>%
-  filter(PERNUM == 1) %>%
-  compute()
+  filter(PERNUM == 1)
 
 ################################################################################
 latino_pop_by_year <- calculate_with_se(
@@ -148,7 +150,6 @@ latino_pop_by_year <- calculate_with_se(
         value = sum(weight),
         .groups = "drop"
       ) %>%
-      collect() %>%
       pivot_wider(names_from = group, values_from = value)
   },
   weight_type = "person"
@@ -183,7 +184,6 @@ foreign_born <- function(data, groupVariable) {
           percent_filtered = filtered_value
         ) %>%
         select(-value, -filtered_value) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = percent_filtered)
     },
     weight_type = "person"
@@ -214,8 +214,7 @@ foreign_born_mexican_region <- foreign_born(
 write_csv(foreign_born_mexican_region, paste0("output/foreign_born_mexican_region_", fragment, ".csv"))
 
 foreign_born_race <- foreign_born(
-  data %>%
-    filter(!is.na(race)),
+  race_summarization_data,
   "race"
 )
 
@@ -251,7 +250,6 @@ citizenship <- function(data, groupVariable) {
           pct_citizen = 100 * citizens / total_latinos
         ) %>%
         select(YEAR, group, pct_citizen) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = pct_citizen)
     },
     weight_type = "person"
@@ -307,7 +305,6 @@ latino_by_region <- calculate_with_se(
       ) %>%
       ungroup() %>%
       select(YEAR, group, region_name, percentage) %>%
-      collect() %>%
       pivot_wider(names_from = group, values_from = percentage)
   },
   weight_type = "person"
@@ -330,7 +327,6 @@ top_occupations <- summarization_data %>%
   arrange(YEAR, group, desc(count)) %>%
   mutate(rank = row_number()) %>%
   ungroup() %>%
-  collect() %>%
   pivot_wider(names_from = group, values_from = c(OCC, count), names_sep = "_")
 
 write_csv(top_occupations, paste0("output/top_occupations_", fragment, ".csv"))
@@ -353,7 +349,6 @@ education <- function(data, groupVariable) {
           pct = 100 * bachelors_above / total_latinos
         ) %>%
         select(YEAR, group, pct) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = pct)
     },
     weight_type = "person"
@@ -418,7 +413,6 @@ business_ownership_func <- function(data, groupVariable) {
           pct_self_employed = 100 * self_employed_latinos / total_latinos
         ) %>%
         select(YEAR, group, pct_self_employed) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = pct_self_employed)
     },
     weight_type = "person"
@@ -482,7 +476,6 @@ farm_status_func <- function(data, groupVariable) {
           pct_farm_households = 100 * latino_farm_households / total_latino_households
         ) %>%
         select(YEAR, group, pct_farm_households) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = pct_farm_households)
     },
     weight_type = "household"
@@ -522,7 +515,6 @@ homeownership_func <- function(data, groupVariable) {
           pct_homeowners = 100 * latino_homeowners / total_latino_households
         ) %>%
         select(YEAR, group, pct_homeowners) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = pct_homeowners)
     },
     weight_type = "household"
@@ -575,7 +567,6 @@ home_values_func <- function(data, groupVariable) {
           .groups = "drop"
         ) %>%
         select(YEAR, group, median_home_value) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = median_home_value)
     },
     weight_type = "household"
@@ -628,7 +619,6 @@ household_income_func <- function(data, groupVariable) {
           .groups = "drop"
         ) %>%
         select(YEAR, group, median_hh_income) %>%
-        collect() %>%
         pivot_wider(names_from = group, values_from = median_hh_income)
     },
     weight_type = "household"
@@ -676,7 +666,6 @@ real_estate_1850 <- household_summarization_data %>%
     .groups = "drop"
   ) %>%
   select(YEAR, group, median_real_estate) %>%
-  collect() %>%
   pivot_wider(names_from = group, values_from = median_real_estate)
 
 write_csv(real_estate_1850, paste0("output/real_estate_", fragment, ".csv"))
