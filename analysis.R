@@ -280,8 +280,7 @@ citizenship_mexican_region <- citizenship(
 write_csv(citizenship_mexican_region, paste0("output/citizenship_mexican_region_", fragment, ".csv"))
 
 citizenship_race <- citizenship(
-  data %>%
-    filter(!is.na(race)),
+  race_summarization_data,
   "race"
 )
 
@@ -379,8 +378,7 @@ education_mexican_region <- education(
 write_csv(education_mexican_region, paste0("output/education_mexican_region_", fragment, ".csv"))
 
 education_race <- education(
-  data %>%
-    filter(!is.na(race)),
+  race_summarization_data,
   "race"
 )
 
@@ -443,8 +441,7 @@ business_ownership_mexican_region <- business_ownership_func(
 write_csv(business_ownership_mexican_region, paste0("output/business_ownership_mexican_region_", fragment, ".csv"))
 
 business_ownership_race <- business_ownership_func(
-  data %>%
-    filter(!is.na(race)),
+  race_summarization_data,
   "race"
 )
 
@@ -545,8 +542,8 @@ homeownership_mexican_region <- homeownership_func(
 write_csv(homeownership_mexican_region, paste0("output/homeownership_mexican_region_", fragment, ".csv"))
 
 homeownership_race <- homeownership_func(
-  data %>%
-    filter(PERNUM == 1 & !is.na(race)),
+  race_summarization_data %>%
+    filter(PERNUM == 1),
   "race"
 )
 
@@ -597,8 +594,8 @@ home_values_mexican_region <- home_values_func(
 write_csv(home_values_mexican_region, paste0("output/home_values_mexican_region_", fragment, ".csv"))
 
 home_values_race <- home_values_func(
-  data %>%
-    filter(PERNUM == 1 & !is.na(race)),
+  race_summarization_data %>%
+    filter(PERNUM == 1),
   "race"
 )
 
@@ -649,8 +646,8 @@ household_income_mexican_region <- household_income_func(
 write_csv(household_income_mexican_region, paste0("output/household_income_mexican_region_", fragment, ".csv"))
 
 household_income_race <- household_income_func(
-  data %>%
-    filter(PERNUM == 1 & !is.na(race)),
+  race_summarization_data %>%
+    filter(PERNUM == 1),
   "race"
 )
 
